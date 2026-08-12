@@ -23,11 +23,12 @@ function BuktiBayarModal({ url, onClose }) {
   )
 }
 
-// Modal input pesanan offline — cari menu via combobox (ketik + hasil dropdown)
+// Modal input pesanan offline — cari menu via combobox + pilih tanggal pesanan
 function OfflineOrderModal({ onClose, onSaved, userId }) {
   const [namaPelanggan, setNamaPelanggan] = useState('')
   const [kamar, setKamar] = useState('')
   const [tipePembayaran, setTipePembayaran] = useState('tunai')
+  const [tanggalPesanan, setTanggalPesanan] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
 
   const [menuList, setMenuList] = useState([])
@@ -91,9 +92,19 @@ function OfflineOrderModal({ onClose, onSaved, userId }) {
       alert('Pilih minimal 1 menu')
       return
     }
+    if (!tanggalPesanan) {
+      alert('Tanggal pesanan wajib diisi')
+      return
+    }
     setSaving(true)
 
     const detail_pesanan = items.map(i => `${i.nama} x${i.qty}`).join(', ')
+
+    // Gabungkan tanggal yang dipilih dengan jam saat ini,
+    // supaya urutan antar pesanan di hari yang sama tetap masuk akal
+    const now = new Date()
+    const createdAt = new Date(tanggalPesanan)
+    createdAt.setHours(now.getHours(), now.getMinutes(), now.getSeconds())
 
     const { error } = await supabase.from('pesanan_masuk').insert({
       nama_pelanggan: namaPelanggan,
@@ -105,6 +116,7 @@ function OfflineOrderModal({ onClose, onSaved, userId }) {
       status: 'diterima',
       sumber: 'offline',
       input_by: userId,
+      created_at: createdAt.toISOString(),
     })
     setSaving(false)
 
@@ -140,6 +152,15 @@ function OfflineOrderModal({ onClose, onSaved, userId }) {
 
         <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' }}>No Meja / Kamar</label>
         <input style={inputStyle} value={kamar} onChange={e => setKamar(e.target.value)} />
+
+        <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' }}>Tanggal Pesanan</label>
+        <input
+          type="date"
+          style={inputStyle}
+          value={tanggalPesanan}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={e => setTanggalPesanan(e.target.value)}
+        />
 
         <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' }}>Cari & Pilih Menu</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 4, position: 'relative' }}>
@@ -256,6 +277,7 @@ const STATUS_STYLE = {
   diterima:            { background: '#D1FAE5', color: '#059669' },
   diproses:            { background: '#E0E7FF', color: '#4338CA' },
   dikirim:             { background: '#D1FAE5', color: '#065F46' },
+  selesai:             { background: '#DCFCE7', color: '#15803D' },
   dibatalkan:          { background: '#FEE2E2', color: '#DC2626' },
   tempo:               { background: '#F3E8FF', color: '#7C3AED' },
 }
@@ -266,14 +288,16 @@ const STATUS_LABEL = {
   diterima:            'Diterima',
   diproses:            'Diproses',
   dikirim:             'Dikirim',
+  selesai:             'Selesai',
   dibatalkan:          'Dibatalkan',
   tempo:               'Tempo',
 }
 
 const STATUS_OPTIONS = {
-  diterima:   ['diproses', 'dibatalkan'],
-  diproses:   ['diproses', 'dikirim', 'dibatalkan'],
-  dikirim:    ['dikirim'],
+  diterima:   ['diproses', 'selesai', 'dibatalkan'],
+  diproses:   ['diproses', 'dikirim', 'selesai', 'dibatalkan'],
+  dikirim:    ['dikirim', 'selesai'],
+  selesai:    ['selesai'],
   dibatalkan: ['dibatalkan'],
 }
 
@@ -360,6 +384,7 @@ export default function Orders() {
       'Diterima': 'diterima',
       'Diproses': 'diproses',
       'Dikirim': 'dikirim',
+      'Selesai': 'selesai',
       'Dibatalkan': 'dibatalkan',
       'Tempo': 'tempo',
     }
@@ -425,6 +450,7 @@ export default function Orders() {
             <option>Diterima</option>
             <option>Diproses</option>
             <option>Dikirim</option>
+            <option>Selesai</option>
             <option>Dibatalkan</option>
             <option>Tempo</option>
           </select>
