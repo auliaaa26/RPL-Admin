@@ -30,7 +30,7 @@ export default function App() {
             <ProtectedRoute><Layout><Orders /></Layout></ProtectedRoute>
           } />
           <Route path="/pembayaran-tempo" element={
-            <ProtectedRoute allowedRoles={['admin']}><Layout><PembayaranTempo /></Layout></ProtectedRoute>
+            <ProtectedRoute allowedRoles={['admin', 'kasir']}><Layout><PembayaranTempo /></Layout></ProtectedRoute>
           } />
           <Route path="/menu" element={
             <ProtectedRoute allowedRoles={['admin']}><Layout><MenuManagement /></Layout></ProtectedRoute>

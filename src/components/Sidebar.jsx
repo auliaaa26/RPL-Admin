@@ -6,7 +6,7 @@ import fotoLogo from '../assets/logo.jpeg'
 const navItems = [
   { to: '/dashboard', icon: '🏠', label: 'Dashboard' },
   { to: '/pesanan', icon: '📋', label: 'Manajemen Pesanan' },
-  { to: '/pembayaran-tempo', icon: '💳', label: 'Manajemen Pembayaran Tempo', roles: ['admin'] },
+  { to: '/pembayaran-tempo', icon: '💳', label: 'Manajemen Pembayaran Tempo', roles: ['admin', 'kasir'] },
   { to: '/menu', icon: '🍽️', label: 'Manajemen Menu', roles: ['admin'] },
   { to: '/pelanggan', icon: '👥', label: 'Data Pelanggan', roles: ['admin'] },
   { to: '/pengeluaran', icon: '💸', label: 'Pengeluaran', roles: ['admin'] },

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../config/supabase'
 import { useAuth } from '../context/AuthContext'
-import { Printer, Eye, CheckCircle, Plus, Trash2 } from 'lucide-react'
+import { Printer, Eye, CheckCircle, Plus, Trash2, User } from 'lucide-react'
 
 function BuktiBayarModal({ url, onClose }) {
   if (!url) return null
@@ -100,30 +100,56 @@ function OfflineOrderModal({ onClose, onSaved, userId }) {
 
     const detail_pesanan = items.map(i => `${i.nama} x${i.qty}`).join(', ')
 
-    // Gabungkan tanggal yang dipilih dengan jam saat ini,
-    // supaya urutan antar pesanan di hari yang sama tetap masuk akal
     const now = new Date()
     const createdAt = new Date(tanggalPesanan)
     createdAt.setHours(now.getHours(), now.getMinutes(), now.getSeconds())
 
-    const { error } = await supabase.from('pesanan_masuk').insert({
+    const { data: pesanan, error } = await supabase.from('pesanan_masuk').insert({
       nama_pelanggan: namaPelanggan,
       kamar: kamar,
       detail_pesanan,
       jumlah: totalJumlah,
       total_harga: totalHarga,
       tipe_pembayaran: tipePembayaran,
-      status: 'diterima',
+      status: tipePembayaran === 'tempo' ? 'tempo' : 'diterima',
       sumber: 'offline',
       input_by: userId,
       created_at: createdAt.toISOString(),
-    })
-    setSaving(false)
+    }).select().single()
 
     if (error) {
+      setSaving(false)
       alert('Gagal simpan pesanan: ' + error.message)
       return
     }
+
+    // Kalau bayar tempo, ikut catat juga ke tabel pembayaran_tempo
+    // (pola yang sama seperti di halaman order customer / Payment.jsx)
+    if (tipePembayaran === 'tempo') {
+      const jatuhTempo = new Date(createdAt)
+      jatuhTempo.setDate(jatuhTempo.getDate() + 14)
+
+      const { error: tempoError } = await supabase.from('pembayaran_tempo').insert({
+        id_pesanan: pesanan.id_pesanan,
+        nama_pelanggan: namaPelanggan,
+        kamar: kamar,
+        detail_pesanan,
+        total_tagihan: totalHarga,
+        tanggal_order: createdAt.toISOString(),
+        jatuh_tempo: jatuhTempo.toISOString(),
+        status: 'Belum Lunas',
+        bukti_bayar: null,
+        tanggal_lunas: null,
+      })
+
+      if (tempoError) {
+        setSaving(false)
+        alert('Pesanan tersimpan, tapi gagal mencatat ke Pembayaran Tempo: ' + tempoError.message)
+        return
+      }
+    }
+
+    setSaving(false)
     onSaved()
     onClose()
   }
@@ -371,8 +397,22 @@ export default function Orders() {
   const [buktiBayarUrl, setBuktiBayarUrl] = useState(null)
   const [showOfflineModal, setShowOfflineModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [adminMap, setAdminMap] = useState({}) // { user_id: { nama, role } }
 
+  useEffect(() => { fetchAdminProfiles() }, [])
   useEffect(() => { fetchOrders() }, [filterStatus])
+
+  // Ambil semua data admin/kasir sekali di awal, buat "menerjemahkan" input_by (uid) jadi nama
+  const fetchAdminProfiles = async () => {
+    const { data, error } = await supabase
+      .from('admin_profile')
+      .select('user_id, nama, role')
+    if (!error && data) {
+      const map = {}
+      data.forEach(p => { map[p.user_id] = { nama: p.nama, role: p.role } })
+      setAdminMap(map)
+    }
+  }
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -423,7 +463,7 @@ export default function Orders() {
         <OfflineOrderModal
           userId={user?.id}
           onClose={() => setShowOfflineModal(false)}
-          onSaved={fetchOrders}
+          onSaved={() => { fetchOrders(); fetchAdminProfiles() }}
         />
       )}
 
@@ -492,6 +532,7 @@ export default function Orders() {
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Detail Pesanan</th>
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Total Harga</th>
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Sumber</th>
+            <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Diinput Oleh</th>
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Pembayaran</th>
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Bukti Bayar</th>
             <th style={{ padding: 12, fontSize: 15, fontWeight: 700 }}>Aksi</th>
@@ -499,88 +540,113 @@ export default function Orders() {
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan="8" style={{ textAlign: 'center', padding: 16, fontSize: 16, fontWeight: 600 }}>Memuat data...</td></tr>
+            <tr><td colSpan="9" style={{ textAlign: 'center', padding: 16, fontSize: 16, fontWeight: 600 }}>Memuat data...</td></tr>
           ) : ordersFiltered.length === 0 ? (
-            <tr><td colSpan="8" style={{ textAlign: 'center', padding: 16, fontSize: 16, fontWeight: 600, color: 'var(--gray-400)' }}>
+            <tr><td colSpan="9" style={{ textAlign: 'center', padding: 16, fontSize: 16, fontWeight: 600, color: 'var(--gray-400)' }}>
               {searchQuery ? 'Tidak ada pesanan yang cocok.' : 'Belum ada pesanan masuk.'}
             </td></tr>
-          ) : ordersFiltered.map(o => (
-            <tr
-              key={o.id_pesanan}
-              style={{
-                borderBottom: '1px solid var(--gray-100)',
-                background: o.status === 'menunggu_konfirmasi' ? '#F0F7FF' : 'white'
-              }}
-            >
-              <td style={{ padding: 12, fontWeight: 700, fontSize: 17 }}>
-                {o.no_meja || '-'}<br />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>{o.kamar || 'Kamar -'}</span>
-              </td>
-              <td style={{ padding: 12, fontWeight: 700, fontSize: 17 }}>{o.nama_pelanggan || 'Pelanggan'}</td>
-              <td style={{ padding: 12, fontWeight: 600, fontSize: 15 }}>
-                {o.detail_pesanan || '-'} <span style={{ color: 'var(--gray-500)', fontWeight: 700 }}>x{o.jumlah || 1}</span>
-              </td>
-              <td style={{ padding: 12, fontWeight: 800, fontSize: 17 }}>
-                Rp.{Number(o.total_harga)?.toLocaleString('id-ID')}
-              </td>
+          ) : ordersFiltered.map(o => {
+            const inputter = o.input_by ? adminMap[o.input_by] : null
+            return (
+              <tr
+                key={o.id_pesanan}
+                style={{
+                  borderBottom: '1px solid var(--gray-100)',
+                  background: o.status === 'menunggu_konfirmasi' ? '#F0F7FF' : 'white'
+                }}
+              >
+                <td style={{ padding: 12, fontWeight: 700, fontSize: 17 }}>
+                  {o.no_meja || '-'}<br />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>{o.kamar || 'Kamar -'}</span>
+                </td>
+                <td style={{ padding: 12, fontWeight: 700, fontSize: 17 }}>{o.nama_pelanggan || 'Pelanggan'}</td>
+                <td style={{ padding: 12, fontWeight: 600, fontSize: 15 }}>
+                  {o.detail_pesanan || '-'} <span style={{ color: 'var(--gray-500)', fontWeight: 700 }}>x{o.jumlah || 1}</span>
+                </td>
+                <td style={{ padding: 12, fontWeight: 800, fontSize: 17 }}>
+                  Rp.{Number(o.total_harga)?.toLocaleString('id-ID')}
+                </td>
 
-              <td style={{ padding: 12 }}>
-                <span style={{
-                  background: o.sumber === 'offline' ? '#FEF3C7' : '#E0F2FE',
-                  color: o.sumber === 'offline' ? '#B45309' : '#0369A1',
-                  fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
-                }}>
-                  {o.sumber === 'offline' ? '🧾 Offline' : '🌐 Online'}
-                </span>
-              </td>
-
-              <td style={{ padding: 12 }}>
-                {o.metode_bayar === 'tempo' || o.status === 'tempo' || o.tipe_pembayaran === 'tempo' ? (
+                <td style={{ padding: 12 }}>
                   <span style={{
-                    background: '#F3E8FF', color: '#7C3AED',
-                    fontSize: 13, fontWeight: 700,
-                    padding: '5px 14px', borderRadius: 999,
-                    display: 'inline-block',
+                    background: o.sumber === 'offline' ? '#FEF3C7' : '#E0F2FE',
+                    color: o.sumber === 'offline' ? '#B45309' : '#0369A1',
+                    fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
                   }}>
-                    📋 Tempo
+                    {o.sumber === 'offline' ? '🧾 Offline' : '🌐 Online'}
                   </span>
-                ) : (
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>—</span>
-                )}
-              </td>
+                </td>
 
-              <td style={{ padding: 12 }}>
-                {o.bukti_bayar ? (
-                  <button
-                    onClick={() => setBuktiBayarUrl(o.bukti_bayar)}
-                    style={{
-                      border: 'none', background: '#DBEAFE', color: '#1D4ED8',
-                      padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontWeight: 700
-                    }}
-                  >
-                    <Eye size={13} /> Lihat
-                  </button>
-                ) : (
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>Tidak ada</span>
-                )}
-              </td>
+                {/* Kolom Diinput Oleh */}
+                <td style={{ padding: 12 }}>
+                  {inputter ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <User size={13} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{inputter.nama || '—'}</div>
+                        <div style={{
+                          fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                          color: inputter.role === 'admin' ? 'var(--orange)' : '#2563EB'
+                        }}>
+                          {inputter.role === 'admin' ? 'Admin' : 'Kasir'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>
+                      {o.sumber === 'offline' ? 'Tidak diketahui' : '— (pesan sendiri)'}
+                    </span>
+                  )}
+                </td>
 
-              <td style={{ padding: 12 }}>
-                {NEEDS_CONFIRM.includes(o.status) ? (
-                  <KonfirmasiButton
-                    onConfirm={() => updateStatus(o.id_pesanan, 'diterima')}
-                    onBatal={() => updateStatus(o.id_pesanan, 'dibatalkan')}
-                  />
-                ) : (
-                  <StatusDropdown
-                    currentStatus={o.status}
-                    onUpdate={(newStatus) => updateStatus(o.id_pesanan, newStatus)}
-                  />
-                )}
-              </td>
-            </tr>
-          ))}
+                <td style={{ padding: 12 }}>
+                  {o.metode_bayar === 'tempo' || o.status === 'tempo' || o.tipe_pembayaran === 'tempo' ? (
+                    <span style={{
+                      background: '#F3E8FF', color: '#7C3AED',
+                      fontSize: 13, fontWeight: 700,
+                      padding: '5px 14px', borderRadius: 999,
+                      display: 'inline-block',
+                    }}>
+                      📋 Tempo
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>—</span>
+                  )}
+                </td>
+
+                <td style={{ padding: 12 }}>
+                  {o.bukti_bayar ? (
+                    <button
+                      onClick={() => setBuktiBayarUrl(o.bukti_bayar)}
+                      style={{
+                        border: 'none', background: '#DBEAFE', color: '#1D4ED8',
+                        padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontWeight: 700
+                      }}
+                    >
+                      <Eye size={13} /> Lihat
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-400)' }}>Tidak ada</span>
+                  )}
+                </td>
+
+                <td style={{ padding: 12 }}>
+                  {NEEDS_CONFIRM.includes(o.status) ? (
+                    <KonfirmasiButton
+                      onConfirm={() => updateStatus(o.id_pesanan, 'diterima')}
+                      onBatal={() => updateStatus(o.id_pesanan, 'dibatalkan')}
+                    />
+                  ) : (
+                    <StatusDropdown
+                      currentStatus={o.status}
+                      onUpdate={(newStatus) => updateStatus(o.id_pesanan, newStatus)}
+                    />
+                  )}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
